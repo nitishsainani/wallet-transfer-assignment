@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"wallet-transfer-assignment/internal/domain"
@@ -44,6 +45,11 @@ func (h *Handler) createTransfer(w http.ResponseWriter, r *http.Request) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
 		writeJSON(w, http.StatusBadRequest, domain.APIResponse{Error: "invalid JSON request body"})
+		return
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		writeJSON(w, http.StatusBadRequest, domain.APIResponse{Error: "request body must contain exactly one JSON object"})
 		return
 	}
 

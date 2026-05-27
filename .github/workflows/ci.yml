@@ -35,7 +35,7 @@ jobs:
 
       - name: Install golangci-lint
         run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$HOME/.local/bin" v1.64.8
+          GOBIN="$HOME/.local/bin" go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Run lint

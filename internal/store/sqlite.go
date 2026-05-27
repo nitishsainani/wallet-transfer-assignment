@@ -17,16 +17,43 @@ type SQLiteRepository struct {
 	db *sql.DB
 }
 
+type Options struct {
+	MaxOpenConns int
+	MaxIdleConns int
+	EnableWAL    bool
+}
+
 func Open(ctx context.Context, dsn string) (*SQLiteRepository, error) {
+	return OpenWithOptions(ctx, dsn, Options{
+		MaxOpenConns: 4,
+		MaxIdleConns: 4,
+		EnableWAL:    true,
+	})
+}
+
+func OpenWithOptions(ctx context.Context, dsn string, options Options) (*SQLiteRepository, error) {
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
+	if options.MaxOpenConns <= 0 {
+		options.MaxOpenConns = 4
+	}
+	if options.MaxIdleConns < 0 {
+		options.MaxIdleConns = 0
+	}
+	db.SetMaxOpenConns(options.MaxOpenConns)
+	db.SetMaxIdleConns(options.MaxIdleConns)
 
 	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;"); err != nil {
 		_ = db.Close()
 		return nil, err
+	}
+	if options.EnableWAL {
+		if _, err := db.ExecContext(ctx, "PRAGMA journal_mode = WAL;"); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
 	}
 	if _, err := db.ExecContext(ctx, schema); err != nil {
 		_ = db.Close()
@@ -255,11 +282,17 @@ func (t *transferTx) CreditWallet(ctx context.Context, walletID string, amount i
 }
 
 func (t *transferTx) CreateLedgerEntries(ctx context.Context, entries []domain.LedgerEntry) error {
+	stmt, err := t.tx.PrepareContext(ctx, `
+		INSERT INTO ledger_entries (id, wallet_id, transfer_id, type, amount)
+		VALUES (?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
 	for _, entry := range entries {
-		if _, err := t.tx.ExecContext(ctx, `
-			INSERT INTO ledger_entries (id, wallet_id, transfer_id, type, amount)
-			VALUES (?, ?, ?, ?, ?)
-		`, entry.ID, entry.WalletID, entry.TransferID, entry.Type, entry.Amount); err != nil {
+		if _, err := stmt.ExecContext(ctx, entry.ID, entry.WalletID, entry.TransferID, entry.Type, entry.Amount); err != nil {
 			return err
 		}
 	}

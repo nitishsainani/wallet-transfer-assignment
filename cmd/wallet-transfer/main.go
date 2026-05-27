@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -26,8 +27,16 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	maxOpenConns, err := getenvInt("WALLET_DB_MAX_OPEN_CONNS", 4)
+	if err != nil {
+		return err
+	}
 	dsn := getenv("WALLET_DB_DSN", "file:wallets.db?_foreign_keys=on&_busy_timeout=5000")
-	repository, err := store.Open(ctx, dsn)
+	repository, err := store.OpenWithOptions(ctx, dsn, store.Options{
+		MaxOpenConns: maxOpenConns,
+		MaxIdleConns: maxOpenConns,
+		EnableWAL:    true,
+	})
 	if err != nil {
 		return err
 	}
@@ -65,4 +74,16 @@ func getenv(key string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func getenvInt(key string, fallback int) (int, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, err
+	}
+	return parsed, nil
 }

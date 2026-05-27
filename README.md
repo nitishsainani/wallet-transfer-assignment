@@ -21,7 +21,7 @@ make run
 The service listens on `:8080` by default and stores data in `wallets.db`. Override with:
 
 ```sh
-ADDR=:9090 WALLET_DB_DSN='file:wallets.db?_foreign_keys=on&_busy_timeout=5000' make run
+ADDR=:9090 WALLET_DB_MAX_OPEN_CONNS=8 WALLET_DB_DSN='file:wallets.db?_foreign_keys=on&_busy_timeout=5000' make run
 ```
 
 ## API
@@ -72,7 +72,7 @@ WHERE id = ?
   AND balance >= ?
 ```
 
-That makes the database enforce no-overdraft behavior. SQLite serializes writes, and the repository uses one open connection plus a busy timeout, which is a conservative fit for this self-contained assignment. On PostgreSQL, the equivalent production approach would use row-level locks or the same conditional update inside a transaction.
+That makes the database enforce no-overdraft behavior. SQLite is configured with WAL mode, a busy timeout, and a configurable connection pool (`WALLET_DB_MAX_OPEN_CONNS`, default `4`) so requests contend at the database layer while preserving correctness. On PostgreSQL, the equivalent production approach would use row-level locks or the same conditional update inside a transaction.
 
 Processed transfers atomically update both balances, insert the debit and credit ledger rows, and transition from `PENDING` to `PROCESSED`. Insufficient-funds transfers transition from `PENDING` to `FAILED` and produce no ledger entries.
 

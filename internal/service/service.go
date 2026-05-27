@@ -100,18 +100,15 @@ func (s *Service) CreateTransfer(ctx context.Context, cmd domain.TransferCommand
 }
 
 func (s *Service) processTransfer(ctx context.Context, tx TransferTx, cmd domain.TransferCommand) (domain.Outcome, error) {
-	fromWallet, found, err := tx.GetWallet(ctx, cmd.FromWalletID)
-	if err != nil {
+	if _, found, err := tx.GetWallet(ctx, cmd.FromWalletID); err != nil {
 		return domain.Outcome{}, err
-	}
-	if !found {
+	} else if !found {
 		return errorOutcome(http.StatusNotFound, "source wallet not found"), nil
 	}
 
-	if _, found, err = tx.GetWallet(ctx, cmd.ToWalletID); err != nil {
+	if _, found, err := tx.GetWallet(ctx, cmd.ToWalletID); err != nil {
 		return domain.Outcome{}, err
-	}
-	if !found {
+	} else if !found {
 		return errorOutcome(http.StatusNotFound, "destination wallet not found"), nil
 	}
 
@@ -129,20 +126,6 @@ func (s *Service) processTransfer(ctx context.Context, tx TransferTx, cmd domain
 	}
 	if err := tx.CreateTransfer(ctx, transfer); err != nil {
 		return domain.Outcome{}, err
-	}
-
-	if fromWallet.Balance < cmd.Amount {
-		transfer.State = domain.TransferFailed
-		transfer.FailureReason = "insufficient funds"
-		if err := tx.SetTransferState(ctx, transfer.ID, transfer.State, transfer.FailureReason); err != nil {
-			return domain.Outcome{}, err
-		}
-		return domain.Outcome{
-			StatusCode: http.StatusUnprocessableEntity,
-			Body: domain.APIResponse{Data: &domain.TransferResponse{
-				Transfer: transfer,
-			}},
-		}, nil
 	}
 
 	fromBalance, debited, err := tx.DebitWallet(ctx, cmd.FromWalletID, cmd.Amount)
