@@ -57,7 +57,7 @@ The schema contains:
 - `wallets`: stored balances with `CHECK (balance >= 0)`.
 - `transfers`: one row per attempted transfer that reaches wallet validation, with `PENDING`, `PROCESSED`, or `FAILED` state.
 - `ledger_entries`: exactly one `DEBIT` and one `CREDIT` row per processed transfer, enforced by `UNIQUE (transfer_id, type)`.
-- `idempotency_records`: durable request hash and stored original response for replay.
+- `idempotency_records`: explicit `idempotency_key`, durable request hash, and stored original response for replay.
 
 ## Consistency Strategy
 

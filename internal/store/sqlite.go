@@ -147,9 +147,9 @@ type transferTx struct {
 
 func (t *transferTx) FindOrCreateIdempotency(ctx context.Context, key string, requestHash string) (service.IdempotencyRecord, bool, error) {
 	result, err := t.tx.ExecContext(ctx, `
-		INSERT INTO idempotency_records (key, request_hash)
+		INSERT INTO idempotency_records (idempotency_key, request_hash)
 		VALUES (?, ?)
-		ON CONFLICT(key) DO NOTHING
+		ON CONFLICT(idempotency_key) DO NOTHING
 	`, key, requestHash)
 	if err != nil {
 		return service.IdempotencyRecord{}, false, err
@@ -162,9 +162,9 @@ func (t *transferTx) FindOrCreateIdempotency(ctx context.Context, key string, re
 	var record service.IdempotencyRecord
 	var completed int
 	err = t.tx.QueryRowContext(ctx, `
-		SELECT key, request_hash, COALESCE(response_code, 0), COALESCE(response_body, X''), completed
+		SELECT idempotency_key, request_hash, COALESCE(response_code, 0), COALESCE(response_body, X''), completed
 		FROM idempotency_records
-		WHERE key = ?
+		WHERE idempotency_key = ?
 	`, key).Scan(&record.Key, &record.RequestHash, &record.ResponseCode, &record.ResponseBody, &completed)
 	if err != nil {
 		return service.IdempotencyRecord{}, false, err
@@ -181,7 +181,7 @@ func (t *transferTx) CompleteIdempotency(ctx context.Context, key string, outcom
 	_, err = t.tx.ExecContext(ctx, `
 		UPDATE idempotency_records
 		SET response_code = ?, response_body = ?, completed = 1, updated_at = CURRENT_TIMESTAMP
-		WHERE key = ?
+		WHERE idempotency_key = ?
 	`, outcome.StatusCode, body, key)
 	return err
 }

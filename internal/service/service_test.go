@@ -82,6 +82,63 @@ func TestCreateTransferReplaysDuplicateIdempotencyKeyWithoutSideEffects(t *testi
 	assertBalance(t, ctx, repository, "wallet_2", 125)
 }
 
+func TestCreateTransferReplaysConcurrentDuplicateIdempotencyKeyWithoutSideEffects(t *testing.T) {
+	ctx := context.Background()
+	repository, transferService := newTestService(t)
+	createWallets(t, ctx, repository, map[string]int64{
+		"wallet_1": 500,
+		"wallet_2": 25,
+	})
+	command := domain.TransferCommand{
+		IdempotencyKey: "key-concurrent-duplicate",
+		FromWalletID:   "wallet_1",
+		ToWalletID:     "wallet_2",
+		Amount:         100,
+	}
+
+	var wg sync.WaitGroup
+	results := make(chan domain.Outcome, 2)
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			outcome, err := transferService.CreateTransfer(ctx, command)
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- outcome
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	for err := range errs {
+		t.Fatalf("concurrent duplicate CreateTransfer returned error: %v", err)
+	}
+	outcomes := make([]domain.Outcome, 0, 2)
+	for outcome := range results {
+		outcomes = append(outcomes, outcome)
+	}
+	if len(outcomes) != 2 {
+		t.Fatalf("outcomes = %d, want 2", len(outcomes))
+	}
+
+	firstResponse := requireTransferResponse(t, outcomes[0])
+	secondResponse := requireTransferResponse(t, outcomes[1])
+	if outcomes[0].StatusCode != http.StatusCreated || outcomes[1].StatusCode != http.StatusCreated {
+		t.Fatalf("status codes = %d/%d, want %d/%d", outcomes[0].StatusCode, outcomes[1].StatusCode, http.StatusCreated, http.StatusCreated)
+	}
+	if secondResponse.Transfer.ID != firstResponse.Transfer.ID {
+		t.Fatalf("duplicate transfer ID = %q, want %q", secondResponse.Transfer.ID, firstResponse.Transfer.ID)
+	}
+	assertLedgerCount(t, ctx, repository, firstResponse.Transfer.ID, 2)
+	assertBalance(t, ctx, repository, "wallet_1", 400)
+	assertBalance(t, ctx, repository, "wallet_2", 125)
+}
+
 func TestCreateTransferRejectsIdempotencyKeyReuseWithDifferentRequest(t *testing.T) {
 	ctx := context.Background()
 	repository, transferService := newTestService(t)
@@ -111,6 +168,21 @@ func TestCreateTransferRejectsIdempotencyKeyReuseWithDifferentRequest(t *testing
 	}
 	assertBalance(t, ctx, repository, "wallet_1", 400)
 	assertBalance(t, ctx, repository, "wallet_2", 125)
+}
+
+func TestCreateTransferReturnsInFlightForIncompleteIdempotencyRecord(t *testing.T) {
+	transferService := service.New(incompleteIdempotencyRepo{})
+
+	_, err := transferService.CreateTransfer(context.Background(), domain.TransferCommand{
+		IdempotencyKey: "key-in-flight",
+		FromWalletID:   "wallet_1",
+		ToWalletID:     "wallet_2",
+		Amount:         100,
+	})
+
+	if !errors.Is(err, service.ErrIdempotencyInFlight) {
+		t.Fatalf("error = %v, want ErrIdempotencyInFlight", err)
+	}
 }
 
 func TestCreateTransferRecordsFailedTransferForInsufficientFunds(t *testing.T) {
@@ -291,4 +363,48 @@ func assertLedgerCount(t *testing.T, ctx context.Context, repository *store.SQLi
 	if len(entries) != expected {
 		t.Fatalf("ledger entry count = %d, want %d", len(entries), expected)
 	}
+}
+
+type incompleteIdempotencyRepo struct{}
+
+func (incompleteIdempotencyRepo) WithinTx(ctx context.Context, fn func(context.Context, service.TransferTx) error) error {
+	return fn(ctx, incompleteIdempotencyTx{})
+}
+
+type incompleteIdempotencyTx struct{}
+
+func (incompleteIdempotencyTx) FindOrCreateIdempotency(_ context.Context, key string, requestHash string) (service.IdempotencyRecord, bool, error) {
+	return service.IdempotencyRecord{
+		Key:         key,
+		RequestHash: requestHash,
+		Completed:   false,
+	}, false, nil
+}
+
+func (incompleteIdempotencyTx) CompleteIdempotency(context.Context, string, domain.Outcome) error {
+	panic("CompleteIdempotency should not be called for in-flight idempotency records")
+}
+
+func (incompleteIdempotencyTx) GetWallet(context.Context, string) (service.Wallet, bool, error) {
+	panic("GetWallet should not be called for in-flight idempotency records")
+}
+
+func (incompleteIdempotencyTx) CreateTransfer(context.Context, domain.Transfer) error {
+	panic("CreateTransfer should not be called for in-flight idempotency records")
+}
+
+func (incompleteIdempotencyTx) SetTransferState(context.Context, string, domain.TransferState, string) error {
+	panic("SetTransferState should not be called for in-flight idempotency records")
+}
+
+func (incompleteIdempotencyTx) DebitWallet(context.Context, string, int64) (int64, bool, error) {
+	panic("DebitWallet should not be called for in-flight idempotency records")
+}
+
+func (incompleteIdempotencyTx) CreditWallet(context.Context, string, int64) (int64, error) {
+	panic("CreditWallet should not be called for in-flight idempotency records")
+}
+
+func (incompleteIdempotencyTx) CreateLedgerEntries(context.Context, []domain.LedgerEntry) error {
+	panic("CreateLedgerEntries should not be called for in-flight idempotency records")
 }

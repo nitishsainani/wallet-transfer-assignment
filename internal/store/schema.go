@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
 );
 
 CREATE TABLE IF NOT EXISTS idempotency_records (
-    key TEXT PRIMARY KEY,
+    idempotency_key TEXT PRIMARY KEY,
     request_hash TEXT NOT NULL,
     response_code INTEGER,
     response_body BLOB,

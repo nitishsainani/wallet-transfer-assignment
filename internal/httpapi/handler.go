@@ -11,6 +11,8 @@ import (
 	"wallet-transfer-assignment/internal/service"
 )
 
+const maxTransferRequestBodyBytes = 1 << 20
+
 type TransferService interface {
 	CreateTransfer(ctx context.Context, cmd domain.TransferCommand) (domain.Outcome, error)
 }
@@ -40,16 +42,17 @@ type createTransferRequest struct {
 }
 
 func (h *Handler) createTransfer(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxTransferRequestBodyBytes)
 	var request createTransferRequest
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
-		writeJSON(w, http.StatusBadRequest, domain.APIResponse{Error: "invalid JSON request body"})
+		writeDecodeError(w, err)
 		return
 	}
 	var extra struct{}
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		writeJSON(w, http.StatusBadRequest, domain.APIResponse{Error: "request body must contain exactly one JSON object"})
+		writeDecodeError(w, err)
 		return
 	}
 
@@ -80,4 +83,13 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+func writeDecodeError(w http.ResponseWriter, err error) {
+	var maxBytesError *http.MaxBytesError
+	if errors.As(err, &maxBytesError) {
+		writeJSON(w, http.StatusRequestEntityTooLarge, domain.APIResponse{Error: "request body exceeds maximum size"})
+		return
+	}
+	writeJSON(w, http.StatusBadRequest, domain.APIResponse{Error: "invalid JSON request body"})
 }

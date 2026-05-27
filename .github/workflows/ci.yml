@@ -17,7 +17,7 @@ jobs:
       LINT_CMD: ${{ vars.LINT_CMD || 'go vet ./...' }}
       FORMAT_CHECK_CMD: ${{ vars.FORMAT_CHECK_CMD || 'test -z "$(gofmt -l cmd internal)"' }}
       TEST_CMD: ${{ vars.TEST_CMD || 'go test ./...' }}
-      CGO_ENABLED: ${{ vars.CGO_ENABLED }}
+      CGO_ENABLED: ${{ vars.CGO_ENABLED || '1' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
